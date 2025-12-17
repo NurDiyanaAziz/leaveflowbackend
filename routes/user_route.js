@@ -76,4 +76,40 @@ router.post('/register_mysql', async (req, res) => {
     }
 });
 
+// POST /api/users/login_details
+// Called by Flutter immediately after Firebase Login success
+router.post('/login_details', async (req, res) => {
+    const { uid } = req.body;
+
+    if (!uid) {
+        return res.status(400).json({ message: "UID is required" });
+    }
+
+    try {
+        // Query the database for the Name and Role
+        // We use the UID (from Firebase) to find the specific user
+        const [rows] = await db.pool.query(
+            'SELECT name, role FROM users WHERE id = ?', 
+            [uid]
+        );
+
+        if (rows.length > 0) {
+            const user = rows[0];
+            
+            // Send the data back to Flutter
+            res.status(200).json({ 
+                status: 'success', 
+                role: user.role,   // e.g., "Manager", "Employee", "HR"
+                name: user.name    // e.g., "Laika"
+            });
+        } else {
+            // User is in Firebase but NOT in MySQL (Data mismatch)
+            res.status(404).json({ message: 'User profile not found in database' });
+        }
+    } catch (error) {
+        console.error("Login Details Error:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 module.exports = router;
