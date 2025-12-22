@@ -12,3 +12,9 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Ignore build output
+dist/
+
+# Ignore all log files
+*.log
