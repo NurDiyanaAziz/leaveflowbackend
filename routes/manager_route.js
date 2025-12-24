@@ -41,7 +41,7 @@ router.get('/requests/pending', async (req, res) => {
     }
 });
 
-// GET /api/manager/requests/history (Fetch Processed Requests)
+// GET /api/manager/requests/history 
 router.get('/requests/history', async (req, res) => {
     const managerId = activeManagerId;
     try {

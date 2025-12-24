@@ -76,4 +76,37 @@ router.post('/register_mysql', async (req, res) => {
     }
 });
 
+// POST /api/users/login_details (Fetch User Role and Profile)
+router.post('/login_details', async (req, res) => {
+    const { uid } = req.body;
+
+    if (!uid) {
+        return res.status(400).send({ message: 'UID is required.' });
+    }
+
+    try {
+        // Query to get user name and role from MySQL
+        const [rows] = await db.pool.query(
+            'SELECT name, role FROM users WHERE id = ?',
+            [uid]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).send({ message: 'User not found in MySQL database.' });
+        }
+
+        const user = rows[0];
+        console.log(`User logged in: ${user.name} (${user.role})`);
+
+        res.status(200).json({
+            message: 'User details retrieved successfully.',
+            name: user.name,
+            role: user.role
+        });
+    } catch (error) {
+        console.error('Error fetching login details:', error.message);
+        res.status(500).send({ message: 'Database error.', error: error.message });
+    }
+});
+
 module.exports = router;
