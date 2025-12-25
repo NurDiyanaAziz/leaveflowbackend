@@ -76,37 +76,47 @@ router.post('/register_mysql', async (req, res) => {
     }
 });
 
-// POST /api/users/login_details (Fetch User Role and Profile)
+// POST /api/users/login_details
 router.post('/login_details', async (req, res) => {
+    // 1. Log what the server received
+    console.log("-----------------------------------------");
+    console.log("LOGIN ATTEMPT RECEIVED");
+    console.log("Request Body:", req.body); 
+    
     const { uid } = req.body;
+    console.log("Extracted UID:", uid);
 
     if (!uid) {
-        return res.status(400).send({ message: 'UID is required.' });
+        console.log("ERROR: UID is missing/undefined in the request body");
+        return res.status(400).json({ message: "UID is required" });
     }
 
     try {
-        // Query to get user name and role from MySQL
-        const [rows] = await db.pool.query(
-            'SELECT name, role FROM users WHERE id = ?',
-            [uid]
-        );
+        // 2. Log the exact query being run
+        const query = 'SELECT * FROM users WHERE id = ?';
+        console.log("Running Query:", query, "with values:", [uid]);
 
-        if (rows.length === 0) {
-            return res.status(404).send({ message: 'User not found in MySQL database.' });
+        const [rows] = await db.pool.query(query, [uid]);
+
+        console.log("Database Results Found:", rows.length);
+        
+        if (rows.length > 0) {
+            console.log("SUCCESS: User found ->", rows[0].name);
+            const user = rows[0];
+            res.status(200).json({ 
+                status: 'success', 
+                role: user.role, 
+                name: user.name 
+            });
+        } else {
+            console.log("FAILURE: Database returned 0 rows.");
+            res.status(404).json({ message: 'User not found in MySQL' });
         }
-
-        const user = rows[0];
-        console.log(`User logged in: ${user.name} (${user.role})`);
-
-        res.status(200).json({
-            message: 'User details retrieved successfully.',
-            name: user.name,
-            role: user.role
-        });
     } catch (error) {
-        console.error('Error fetching login details:', error.message);
-        res.status(500).send({ message: 'Database error.', error: error.message });
+        console.error("CRITICAL SQL ERROR:", error);
+        res.status(500).json({ error: error.message });
     }
+    console.log("-----------------------------------------");
 });
 
 module.exports = router;
