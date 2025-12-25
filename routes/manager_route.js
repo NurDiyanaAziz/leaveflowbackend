@@ -21,6 +21,8 @@ router.get('/requests/pending', async (req, res) => {
                 LeaveRequest.end_date, 
                 LeaveRequest.days_requested, 
                 LeaveRequest.reason, 
+                LeaveRequest.attachment_url,
+                LeaveRequest.manager_remarks,
                 LeaveRequest.created_at
             FROM leave_requests LeaveRequest
             JOIN users Employee ON LeaveRequest.user_id = Employee.id
@@ -53,7 +55,10 @@ router.get('/requests/history', async (req, res) => {
                 LeaveType.name AS leave_type,
                 LeaveRequest.start_date, 
                 LeaveRequest.end_date, 
-                LeaveRequest.days_requested, 
+                LeaveRequest.days_requested,
+                LeaveRequest.reason, 
+                LeaveRequest.attachment_url,
+                LeaveRequest.manager_remarks, 
                 LeaveRequest.status,
                 LeaveRequest.approver_id,
                 LeaveRequest.created_at
@@ -77,7 +82,7 @@ router.get('/requests/history', async (req, res) => {
 // PUT /api/manager/request/:requestId (Approve/Reject Logic)
 router.put('/request/:requestId', async (req, res) => {
     const managerId = activeManagerId;
-    const { action } = req.body; // action: 'approve' or 'reject'
+    const { action,remarks } = req.body; // action: 'approve' or 'reject'
     const { requestId } = req.params;
     
     if (!action || (action !== 'approve' && action !== 'reject')) {
@@ -113,8 +118,8 @@ router.put('/request/:requestId', async (req, res) => {
         
         const newStatus = action === 'approve' ? 'Approved' : 'Rejected';
         await connection.query(
-            `UPDATE leave_requests SET status = ?, approver_id = ?, last_updated_at = NOW() WHERE id = ?`,
-            [newStatus, managerId, requestId]
+            `UPDATE leave_requests SET status = ?, approver_id = ?, manager_remarks = ?, last_updated_at = NOW() WHERE id = ?`,
+            [newStatus, managerId, remarks || null, requestId]
         );
 
         if (action === 'approve') {

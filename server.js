@@ -11,6 +11,8 @@ const PORT = 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.use('/uploads', express.static('uploads'));
+
 // --- API Routing ---
 // All user-related routes (including registration) are prefixed with /api/users
 app.use('/api/users', userRoutes);
