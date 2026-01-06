@@ -119,4 +119,67 @@ router.post('/login_details', async (req, res) => {
     console.log("-----------------------------------------");
 });
 
+// ==========================================
+// 1. GET FULL PROFILE (Includes Manager Name)
+// ==========================================
+// GET /api/users/profile/:uid
+router.get('/profile/:uid', async (req, res) => {
+    const { uid } = req.params;
+
+    try {
+        // We perform a "Self-Join" here:
+        // We join the 'users' table with itself to find the Manager's name
+        const sql = `
+            SELECT 
+                u.id, u.name, u.email, u.role, 
+                u.phone, u.department, u.position, u.address, u.joined_at,
+                m.name AS manager_name
+            FROM users u
+            LEFT JOIN users m ON u.manager_id = m.id
+            WHERE u.id = ?`;
+
+        const [rows] = await db.pool.query(sql, [uid]);
+
+        if (rows.length > 0) {
+            res.status(200).json({ 
+                status: 'success', 
+                data: rows[0] 
+            });
+        } else {
+            res.status(404).json({ message: 'User not found' });
+        }
+    } catch (error) {
+        console.error("Error fetching profile:", error);
+        res.status(500).json({ message: 'Server error fetching profile' });
+    }
+});
+
+// ==========================================
+// 2. UPDATE PROFILE (Phone & Address Only)
+// ==========================================
+// POST /api/users/profile/update
+router.post('/profile/update', async (req, res) => {
+    const { uid, phone, address } = req.body;
+
+    // Basic validation
+    if (!uid) {
+        return res.status(400).json({ message: "UID is required" });
+    }
+
+    try {
+        const sql = `UPDATE users SET phone = ?, address = ? WHERE id = ?`;
+        
+        const [result] = await db.pool.query(sql, [phone, address, uid]);
+
+        if (result.affectedRows > 0) {
+            res.status(200).json({ message: 'Profile updated successfully' });
+        } else {
+            res.status(404).json({ message: 'User not found or no changes made' });
+        }
+    } catch (error) {
+        console.error("Error updating profile:", error);
+        res.status(500).json({ message: 'Failed to update profile' });
+    }
+});
+
 module.exports = router;
