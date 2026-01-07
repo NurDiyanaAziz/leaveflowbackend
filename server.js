@@ -1,6 +1,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const userRoutes = require('./routes/user_route');
+const leaveRequestRoute = require('./routes/leave_request_route');
 // NOTE: Use a real logger like winston in a production app
 // const logger = require('./logger'); 
 
@@ -14,6 +15,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // --- API Routing ---
 // All user-related routes (including registration) are prefixed with /api/users
 app.use('/api/users', userRoutes);
+app.use('/api/requests', leaveRequestRoute);
 
 // Basic Health Check Route
 app.get('/', (req, res) => {
