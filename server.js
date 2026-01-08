@@ -1,6 +1,6 @@
 const express = require('express');
-const bodyParser = require('body-parser');
 const userRoutes = require('./routes/user_route');
+const managerRoutes = require('./routes/manager_route'); 
 // NOTE: Use a real logger like winston in a production app
 // const logger = require('./logger'); 
 
@@ -8,12 +8,16 @@ const app = express();
 const PORT = 3000;
 
 // Middleware setup
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.use('/uploads', express.static('uploads'));
 
 // --- API Routing ---
 // All user-related routes (including registration) are prefixed with /api/users
 app.use('/api/users', userRoutes);
+
+app.use('/api/manager', managerRoutes);
 
 // Basic Health Check Route
 app.get('/', (req, res) => {
