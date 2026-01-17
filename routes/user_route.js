@@ -1,6 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db'); 
+const multer = require('multer');
+const path = require('path');
+
+// CONFIGURE MULTER (Memory storage is easiest for simple handling)
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/'); // Make sure this folder exists!
+  },
+  filename: function (req, file, cb) {
+    // Save as: timestamp-filename.jpg to avoid duplicates
+    cb(null, Date.now() + path.extname(file.originalname)); 
+  }
+});
+const upload = multer({ storage: storage });
 
 // POST /api/users/register_mysql
 router.post('/register_mysql', async (req, res) => {
@@ -86,13 +100,23 @@ router.get('/leave-balance', async (req, res) => {
 
     const connection = await db.pool.getConnection();
     
+    // 👇 UPDATED QUERY WITH CASE LOGIC
     const query = `
       SELECT 
         lt.id as leave_type_id,
         lt.name as leave_type,
         lb.remaining_days as available,
-        (14 - lb.remaining_days) as used,
-        14 as total
+        
+        CASE 
+           WHEN lt.name = 'Unpaid Leave' THEN 0 
+           ELSE (14 - lb.remaining_days) 
+        END as used,
+        
+        CASE 
+           WHEN lt.name = 'Unpaid Leave' THEN 999 
+           ELSE 14 
+        END as total
+
       FROM leave_balances lb
       JOIN leave_types lt ON lb.leave_type_id = lt.id
       WHERE lb.user_id = ?
@@ -110,8 +134,13 @@ router.get('/leave-balance', async (req, res) => {
 });
 
 // POST /api/users/leave-request
-router.post('/leave-request', async (req, res) => {
-  const { user_id, leave_type_id, start_date, end_date, days, reason } = req.body;
+router.post('/leave-request', upload.single('attachment'), async (req, res) => {
+  const { user_id, leave_type_id, start_date, end_date, days_requested, reason } = req.body;
+
+  const days = days_requested;
+
+  console.log("Parsed Body:", req.body);
+  console.log("Parsed File:", req.file);
 
   // Validation
   if (!user_id || !leave_type_id || !start_date || !end_date || !days || !reason) {
@@ -120,6 +149,12 @@ router.post('/leave-request', async (req, res) => {
       message: 'Missing required fields (user_id, leave_type_id, start_date, end_date, days, reason).' 
     });
   }
+
+  // 👇 1. EXTRACT FILE PATH (Handle case where no file is uploaded)
+  // We use .path to get the location, and replace backslashes with forward slashes for Windows compatibility
+  const attachmentUrl = (req.file && req.file.path) 
+      ? req.file.path.replace(/\\/g, "/") 
+      : null;
 
   let connection;
 
@@ -133,12 +168,10 @@ router.post('/leave-request', async (req, res) => {
       [user_id, leave_type_id]
     );
 
+    // ... (Balance Check Logic stays the same) ...
     if (balanceCheck.length === 0) {
       await connection.rollback();
-      return res.status(404).send({ 
-        success: false,
-        message: 'Leave balance not found for this user and leave type.' 
-      });
+      return res.status(404).send({ success: false, message: 'Leave balance not found.' });
     }
 
     const remainingDays = parseFloat(balanceCheck[0].remaining_days);
@@ -147,25 +180,27 @@ router.post('/leave-request', async (req, res) => {
     if (remainingDays < requestedDays) {
       await connection.rollback();
       return res.status(400).send({ 
-        success: false,
-        message: `Insufficient leave balance. Available: ${remainingDays} days, Requested: ${requestedDays} days.` 
+        success: false, 
+        message: `Insufficient leave balance. Available: ${remainingDays}, Requested: ${requestedDays}.` 
       });
     }
 
-    // 2. Insert leave request
+    // 👇 2. UPDATE SQL QUERY (Added attachment_url)
     const insertRequestQuery = `
-    INSERT INTO leave_requests 
-    (user_id, leave_type_id, start_date, end_date, days_requested, reason, status, created_at) 
-    VALUES (?, ?, ?, ?, ?, ?, 'Pending', NOW())
+      INSERT INTO leave_requests 
+      (user_id, leave_type_id, start_date, end_date, days_requested, reason, attachment_url, status, created_at) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', NOW())
     `;
 
+    // 👇 3. UPDATE PARAMETERS (Added attachmentUrl)
     const [result] = await connection.query(insertRequestQuery, [
       user_id,
       leave_type_id,
       start_date,
       end_date,
       days,
-      reason
+      reason,
+      attachmentUrl // <--- Pass the file path here
     ]);
 
     // 3. Commit transaction
@@ -185,7 +220,7 @@ router.post('/leave-request', async (req, res) => {
     
     res.status(500).send({ 
       success: false,
-      message: 'Internal server error while creating leave request.', 
+      message: 'Internal server error.', 
       error: error.message 
     });
   } finally {
@@ -220,7 +255,7 @@ router.get('/leave-requests', async (req, res) => {
         lr.days_requested as days,
         lr.reason,
         lr.status,
-        lr.manager_response,
+        lr.manager_remarks,
         lr.created_at,
         lr.last_updated_at as updated_at
     FROM leave_requests lr
@@ -259,6 +294,46 @@ router.get('/leave-requests', async (req, res) => {
       success: false,
       error: 'Failed to fetch leave requests' 
     });
+  }
+});
+
+// POST /api/users/cancel-request
+router.post('/cancel-request', async (req, res) => {
+  const { requestId, userId } = req.body;
+
+  if (!requestId || !userId) {
+    return res.status(400).json({ success: false, message: 'Missing Data' });
+  }
+
+  const connection = await db.pool.getConnection();
+  try {
+    // 1. Check if request exists, belongs to user, and is Pending
+    const [check] = await connection.query(
+      'SELECT status FROM leave_requests WHERE id = ? AND user_id = ?', 
+      [requestId, userId]
+    );
+
+    if (check.length === 0) {
+      return res.status(404).json({ success: false, message: 'Request not found' });
+    }
+
+    if (check[0].status !== 'Pending') {
+      return res.status(400).json({ success: false, message: 'You can only cancel Pending requests.' });
+    }
+
+    // 2. Cancel it
+    await connection.query(
+      "UPDATE leave_requests SET status = 'Cancelled' WHERE id = ?",
+      [requestId]
+    );
+
+    res.json({ success: true, message: 'Request cancelled' });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Server Error' });
+  } finally {
+    connection.release();
   }
 });
 

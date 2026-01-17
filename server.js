@@ -15,6 +15,9 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // All user-related routes (including registration) are prefixed with /api/users
 app.use('/api/users', userRoutes);
 
+//upload attachment_url
+app.use('/uploads', express.static('uploads'));
+
 // Basic Health Check Route
 app.get('/', (req, res) => {
     res.status(200).send({ message: 'LeaveFlow API is running.' });
