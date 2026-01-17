@@ -15,7 +15,8 @@ const pool = mysql.createPool({
     database: process.env.DB_DATABASE || 'leaveflowdb', // Reads from .env
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 0,
+    dateStrings: true
 });
 
 // Export a simple function to execute queries

@@ -19,6 +19,9 @@ app.use('/api/users', userRoutes);
 
 app.use('/api/manager', managerRoutes);
 
+//upload attachment_url
+app.use('/uploads', express.static('uploads'));
+
 // Basic Health Check Route
 app.get('/', (req, res) => {
     res.status(200).send({ message: 'LeaveFlow API is running.' });
