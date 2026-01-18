@@ -119,4 +119,57 @@ router.post('/login_details', async (req, res) => {
     console.log("-----------------------------------------");
 });
 
+// POST /api/users/update-fcm
+// Called immediately after successful login
+router.post('/update-fcm', async (req, res) => {
+    const { uid, fcm_token } = req.body;
+
+    if (!uid || !fcm_token) {
+        return res.status(400).json({ success: false, message: 'Missing UID or Token' });
+    }
+
+    try {
+        // We use ON DUPLICATE KEY UPDATE logic (or just simple UPDATE if user exists)
+        // Since the user MUST exist to login, a simple UPDATE is safe.
+        const query = `UPDATE users SET fcm_token = ? WHERE firebase_uid = ?`;
+        
+        const [result] = await db.pool.query(query, [fcm_token, uid]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        console.log(`✅ FCM Token updated for user ${uid}`);
+        res.json({ success: true, message: 'Token updated' });
+
+    } catch (error) {
+        console.error('Update FCM Error:', error);
+        res.status(500).json({ success: false, message: 'Database error' });
+    }
+});
+
+// POST /api/users/remove-fcm
+// Called when user clicks "Logout"
+router.post('/remove-fcm', async (req, res) => {
+    const { uid } = req.body;
+
+    if (!uid) {
+        return res.status(400).json({ success: false, message: 'Missing UID' });
+    }
+
+    try {
+        // Set token to NULL so they stop receiving notifications
+        const query = `UPDATE users SET fcm_token = NULL WHERE firebase_uid = ?`;
+        
+        await db.pool.query(query, [uid]);
+
+        console.log(`🔌 FCM Token removed for user ${uid}`);
+        res.json({ success: true, message: 'Token removed' });
+
+    } catch (error) {
+        console.error('Remove FCM Error:', error);
+        res.status(500).json({ success: false, message: 'Database error' });
+    }
+});
+
 module.exports = router;
