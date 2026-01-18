@@ -11,7 +11,7 @@ require('dotenv').config();
 const pool = mysql.createPool({
     host: process.env.DB_HOST || 'localhost',      // Reads from .env
     user: process.env.DB_USER || 'root',          // Reads from .env
-    password: process.env.DB_PASSWORD,           // Reads from .env (REQUIRED)
+    password: process.env.DB_PASSWORD || 'root',           // Reads from .env (REQUIRED)
     database: process.env.DB_DATABASE || 'leaveflowdb', // Reads from .env
     waitForConnections: true,
     connectionLimit: 10,

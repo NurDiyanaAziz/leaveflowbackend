@@ -1,6 +1,7 @@
 const express = require('express');
 const userRoutes = require('./routes/user_route');
 const managerRoutes = require('./routes/manager_route'); 
+const leaveRequestRoute = require('./routes/leave_request_route');
 // NOTE: Use a real logger like winston in a production app
 // const logger = require('./logger'); 
 
@@ -21,6 +22,7 @@ app.use('/api/manager', managerRoutes);
 
 //upload attachment_url
 app.use('/uploads', express.static('uploads'));
+app.use('/api/requests', leaveRequestRoute);
 
 // Basic Health Check Route
 app.get('/', (req, res) => {
