@@ -4,6 +4,8 @@ const db = require('../db');
 const multer = require('multer');
 const path = require('path');
 
+const notificationService = require('../services/notification.service');
+
 // CONFIGURE MULTER (Memory storage is easiest for simple handling)
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -311,8 +313,61 @@ router.post('/leave-request', upload.single('attachment'), async (req, res) => {
     // 3. Commit transaction
     await connection.commit();
 
-    console.log(`Leave request created: User ${user_id}, Request ID: ${result.insertId}`);
-    
+    console.log(`Leave request created. ID: ${result.insertId}`);
+
+    // 👇 NOTIFICATION LOGIC (Supports VARCHAR manager_id)
+    try {
+        // Step A: Get Employee Name and their Manager ID
+        const [userRows] = await db.pool.query(
+            'SELECT manager_id, name FROM users WHERE id = ?', 
+            [user_id]
+        );
+
+        if (userRows.length > 0) {
+            const employeeName = userRows[0].name;
+            
+            // 1. Get the raw ID (It will be a String, e.g., "MGR-001" or "105")
+            let targetManagerId = userRows[0].manager_id;
+
+            // 2. Safety Check: Convert "null" string or empty string to real null
+            // (Sometimes imported data in VARCHAR columns stores "null" as text)
+            if (targetManagerId === 'null' || targetManagerId === '') {
+                targetManagerId = null;
+            }
+
+            // Step B: Fallback - If no manager, find ANY Manager in the system
+            if (!targetManagerId) {
+                console.log("No manager_id assigned. Searching for a general Manager...");
+                const [managerRows] = await db.pool.query(
+                    'SELECT id FROM users WHERE role = ? LIMIT 1', 
+                    ['Manager']
+                );
+                if (managerRows.length > 0) {
+                    targetManagerId = managerRows[0].id;
+                }
+            }
+
+            // Step C: Send Notification
+            if (targetManagerId) {
+                // Optional: Get Leave Type Name
+                const [typeRows] = await db.pool.query('SELECT name FROM leave_types WHERE id = ?', [leave_type_id]);
+                const leaveTypeName = typeRows.length > 0 ? typeRows[0].name : 'Leave';
+
+                await notificationService.sendPushToManager(
+                    targetManagerId, // Passing String ID works fine here
+                    employeeName, 
+                    leaveTypeName, 
+                    result.insertId
+                );
+            } else {
+                console.log("⚠️ No Manager found to notify.");
+            }
+        }
+    } catch (notifError) {
+        console.error("Failed to send notification:", notifError);
+    }
+    // 👆 END NOTIFICATION LOGIC
+
     res.status(201).send({ 
       success: true,
       message: 'Leave request submitted successfully.', 
@@ -454,7 +509,7 @@ router.post('/update-fcm', async (req, res) => {
     try {
         // We use ON DUPLICATE KEY UPDATE logic (or just simple UPDATE if user exists)
         // Since the user MUST exist to login, a simple UPDATE is safe.
-        const query = `UPDATE users SET fcm_token = ? WHERE firebase_uid = ?`;
+        const query = `UPDATE users SET fcm_token = ? WHERE id = ?`;
         
         const [result] = await db.pool.query(query, [fcm_token, uid]);
 
@@ -482,7 +537,7 @@ router.post('/remove-fcm', async (req, res) => {
 
     try {
         // Set token to NULL so they stop receiving notifications
-        const query = `UPDATE users SET fcm_token = NULL WHERE firebase_uid = ?`;
+        const query = `UPDATE users SET fcm_token = NULL WHERE id = ?`;
         
         await db.pool.query(query, [uid]);
 
@@ -492,6 +547,49 @@ router.post('/remove-fcm', async (req, res) => {
     } catch (error) {
         console.error('Remove FCM Error:', error);
         res.status(500).json({ success: false, message: 'Database error' });
+    }
+});
+
+// GET /api/users/leave-request/:id
+// Retrieve a single leave request details (Used for Notification Deep Links)
+router.get('/leave-request/:id', async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const query = `
+            SELECT 
+                lr.*, 
+                u.name AS employee_name, 
+                lt.name AS leave_type,
+                u.email,
+                u.position
+            FROM leave_requests lr
+            JOIN users u ON lr.user_id = u.id
+            JOIN leave_types lt ON lr.leave_type_id = lt.id
+            WHERE lr.id = ?
+        `;
+
+        const [rows] = await db.pool.query(query, [id]);
+
+        if (rows.length === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Leave request not found' 
+            });
+        }
+
+        // Return the data wrapper 'data' because your Flutter code expects response.data['data']
+        res.json({ 
+            success: true, 
+            data: rows[0] 
+        });
+
+    } catch (error) {
+        console.error('Error fetching request details:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Server Error' 
+        });
     }
 });
 

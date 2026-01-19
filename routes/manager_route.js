@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const notificationService = require('../services/notification.service');
 
 // Hardcoded manager ID for development/testing
 const TEST_MANAGER_ID_ORIGINAL = 'hJydLYnwKDY04yIN4wGVTkIflVl2'; 
@@ -81,8 +82,11 @@ router.get('/requests/history', async (req, res) => {
 
 // PUT /api/manager/request/:requestId (Approve/Reject Logic)
 router.put('/request/:requestId', async (req, res) => {
-    const managerId = activeManagerId;
-    const { action,remarks } = req.body; // action: 'approve' or 'reject'
+    // ⚠️ Ensure activeManagerId is defined (usually from req.user.id via middleware)
+    // const managerId = req.user.id; 
+    const managerId = activeManagerId; 
+
+    const { action, remarks } = req.body; 
     const { requestId } = req.params;
     
     if (!action || (action !== 'approve' && action !== 'reject')) {
@@ -94,9 +98,10 @@ router.put('/request/:requestId', async (req, res) => {
         connection = await db.pool.getConnection();
         await connection.beginTransaction();
 
+        // 1. Fetch Request & Verify Manager Authority
         const [requestRows] = await connection.query(
             `SELECT user_id, leave_type_id, days_requested, status, 
-            (SELECT manager_id FROM users WHERE id = user_id) AS request_manager_id 
+            (SELECT manager_id FROM users WHERE id = leave_requests.user_id) AS request_manager_id 
             FROM leave_requests WHERE id = ?`, [requestId]
         );
 
@@ -106,7 +111,10 @@ router.put('/request/:requestId', async (req, res) => {
         }
 
         const request = requestRows[0];
-        if (request.request_manager_id !== managerId) {
+
+        // Authorization Check
+        // Note: Using loose equality (!=) handles string vs int manager ID issues
+        if (request.request_manager_id != managerId) {
              await connection.rollback();
              return res.status(403).json({ message: 'Forbidden: You are not authorized for this employee.' });
         }
@@ -117,11 +125,14 @@ router.put('/request/:requestId', async (req, res) => {
         }
         
         const newStatus = action === 'approve' ? 'Approved' : 'Rejected';
+
+        // 2. Update Status
         await connection.query(
             `UPDATE leave_requests SET status = ?, approver_id = ?, manager_remarks = ?, last_updated_at = NOW() WHERE id = ?`,
             [newStatus, managerId, remarks || null, requestId]
         );
 
+        // 3. Deduct Balance (Only if Approved)
         if (action === 'approve') {
             const [updateResult] = await connection.query(
                 `UPDATE leave_balances SET remaining_days = remaining_days - ?, last_updated_at = NOW()
@@ -134,11 +145,34 @@ router.put('/request/:requestId', async (req, res) => {
             }
         }
 
+        // 4. Commit Transaction (Database work is done)
         await connection.commit();
+
+        // ---------------------------------------------------------
+        // 👇 NEW: Trigger Notification to Employee
+        // ---------------------------------------------------------
+        try {
+            // request.user_id is available from the SELECT query at the top
+            await notificationService.sendPushToEmployee(
+                request.user_id, 
+                newStatus, 
+                requestId
+            );
+        } catch (notifError) {
+            // We catch this separately so the response doesn't crash 
+            // if the notification fails (the DB update is already saved).
+            console.error("Notification failed but DB updated:", notifError);
+        }
+        // ---------------------------------------------------------
+
         res.status(200).json({ message: `Request ${newStatus} successfully.` });
 
     } catch (error) {
         if (connection) await connection.rollback();
+        // Check if it was our custom error
+        if (error.message === 'Insufficient leave balance.') {
+            return res.status(400).json({ message: error.message });
+        }
         res.status(500).json({ message: 'Transaction failed.', error: error.message });
     } finally {
         if (connection) connection.release();
