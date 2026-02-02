@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db'); 
 const multer = require('multer');
 const path = require('path');
+const otpController = require('../services/otp.controller');
 
 const notificationService = require('../services/notification.service');
 
@@ -17,6 +18,12 @@ const storage = multer.diskStorage({
   }
 });
 const upload = multer({ storage: storage });
+
+// Send OTP
+router.post('/request-otp', otpController.requestOtp);
+router.post('/verify-otp', otpController.verifyOtp);
+
+router.post('/reset-password', otpController.resetPassword);
 
 // POST /api/users/register_mysql
 router.post('/register_mysql', async (req, res) => {
