@@ -18,3 +18,10 @@ dist/
 
 # Ignore all log files
 *.log
+
+# Secrets
+serviceAccountKey.json
+.env
+
+# User Uploads
+uploads/
