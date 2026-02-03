@@ -6,6 +6,7 @@ const path = require('path');
 const otpController = require('../services/otp.controller');
 
 const notificationService = require('../services/notification.service');
+const userController = require('../services/user.controller');
 
 // CONFIGURE MULTER (Memory storage is easiest for simple handling)
 const storage = multer.diskStorage({
@@ -599,5 +600,9 @@ router.get('/leave-request/:id', async (req, res) => {
         });
     }
 });
+
+// Admin route to trigger New Year processing
+router.post('/admin/rollover-year', userController.rolloverLeaveYear);
+
 
 module.exports = router;
