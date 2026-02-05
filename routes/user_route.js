@@ -7,6 +7,7 @@ const otpController = require('../services/otp.controller');
 
 const notificationService = require('../services/notification.service');
 const userController = require('../services/user.controller');
+const leaveController = require('../services/leave_controller');
 
 // CONFIGURE MULTER (Memory storage is easiest for simple handling)
 const storage = multer.diskStorage({
@@ -249,152 +250,298 @@ router.get('/leave-balance', async (req, res) => {
 });
 
 // POST /api/users/leave-request
+// router.post('/leave-request', upload.single('attachment'), async (req, res) => {
+//   const { user_id, leave_type_id, start_date, end_date, days_requested, reason } = req.body;
+
+//   const days = days_requested;
+
+//   console.log("Parsed Body:", req.body);
+//   console.log("Parsed File:", req.file);
+
+//   // Validation
+//   if (!user_id || !leave_type_id || !start_date || !end_date || !days || !reason) {
+//     return res.status(400).send({ 
+//       success: false,
+//       message: 'Missing required fields (user_id, leave_type_id, start_date, end_date, days, reason).' 
+//     });
+//   }
+
+//   // Extract File Path
+//   const attachmentUrl = (req.file && req.file.path) 
+//       ? req.file.path.replace(/\\/g, "/") 
+//       : null;
+
+//   let connection;
+
+//   try {
+//     connection = await db.pool.getConnection();
+//     await connection.beginTransaction();
+
+//     // 🔴 1. NEW: OVERLAP CHECK (Must be inside transaction)
+//     // We check for any 'Pending' or 'Approved' requests that clash with the new dates.
+//     const overlapSql = `
+//         SELECT id FROM leave_requests 
+//         WHERE user_id = ? 
+//         AND status IN ('Pending', 'Approved') 
+//         AND (DATE(start_date) <= DATE(?) AND DATE(end_date) >= DATE(?))
+//     `;
+    
+//     // Note: We use 'connection.query' here because we are inside a transaction
+//     const [existing] = await connection.query(overlapSql, [user_id, end_date, start_date]);
+
+//     if (existing.length > 0) {
+//         console.log("❌ Overlap found. Rolling back.");
+//         await connection.rollback(); // CRITICAL: Release the lock
+//         return res.status(400).send({ 
+//             success: false, 
+//             message: 'You already have a Pending or Approved leave for these dates!' 
+//         });
+//     }
+//     // ---------------------------------------------------------
+
+//     // 2. Check if user has enough leave balance
+//     const [balanceCheck] = await connection.query(
+//       'SELECT remaining_days FROM leave_balances WHERE user_id = ? AND leave_type_id = ?',
+//       [user_id, leave_type_id]
+//     );
+
+//     if (balanceCheck.length === 0) {
+//       await connection.rollback();
+//       return res.status(404).send({ success: false, message: 'Leave balance not found.' });
+//     }
+
+//     const remainingDays = parseFloat(balanceCheck[0].remaining_days);
+//     const requestedDays = parseFloat(days);
+
+//     if (remainingDays < requestedDays) {
+//       await connection.rollback();
+//       return res.status(400).send({ 
+//         success: false, 
+//         message: `Insufficient leave balance. Available: ${remainingDays}, Requested: ${requestedDays}.` 
+//       });
+//     }
+
+//     // 3. Insert Request
+//     const insertRequestQuery = `
+//       INSERT INTO leave_requests 
+//       (user_id, leave_type_id, start_date, end_date, days_requested, reason, attachment_url, status, created_at) 
+//       VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', NOW())
+//     `;
+
+//     const [result] = await connection.query(insertRequestQuery, [
+//       user_id,
+//       leave_type_id,
+//       start_date,
+//       end_date,
+//       days,
+//       reason,
+//       attachmentUrl
+//     ]);
+
+//     // 4. Commit transaction (Everything is good!)
+//     await connection.commit();
+
+//     console.log(`Leave request created. ID: ${result.insertId}`);
+
+//     // --- NOTIFICATION LOGIC (Kept exactly as you had it) ---
+//     try {
+//         const [userRows] = await db.pool.query(
+//             'SELECT manager_id, name FROM users WHERE id = ?', [user_id]
+//         );
+
+//         if (userRows.length > 0) {
+//             const employeeName = userRows[0].name;
+//             let targetManagerId = userRows[0].manager_id;
+
+//             if (targetManagerId === 'null' || targetManagerId === '') {
+//                 targetManagerId = null;
+//             }
+
+//             if (!targetManagerId) {
+//                 const [managerRows] = await db.pool.query(
+//                     'SELECT id FROM users WHERE role = ? LIMIT 1', ['Manager']
+//                 );
+//                 if (managerRows.length > 0) {
+//                     targetManagerId = managerRows[0].id;
+//                 }
+//             }
+
+//             if (targetManagerId) {
+//                 const [typeRows] = await db.pool.query('SELECT name FROM leave_types WHERE id = ?', [leave_type_id]);
+//                 const leaveTypeName = typeRows.length > 0 ? typeRows[0].name : 'Leave';
+
+//                 // Assuming notificationService is imported at the top of your file
+//                 // If not, ensure you import it!
+//                  /* await notificationService.sendPushToManager(
+//                     targetManagerId, 
+//                     employeeName, 
+//                     leaveTypeName, 
+//                     result.insertId
+//                 ); */
+//             }
+//         }
+//     } catch (notifError) {
+//         console.error("Failed to send notification:", notifError);
+//     }
+//     // -------------------------------------------------------
+
+//     res.status(201).send({ 
+//       success: true,
+//       message: 'Leave request submitted successfully.', 
+//       request_id: result.insertId 
+//     });
+
+//   } catch (error) {
+//     if (connection) await connection.rollback();
+//     console.error('Error creating leave request:', error);
+    
+//     res.status(500).send({ 
+//       success: false,
+//       message: 'Internal server error.', 
+//       error: error.message 
+//     });
+//   } finally {
+//     if (connection) connection.release();
+//   }
+// });
+// POST /api/requests/leave-request
 router.post('/leave-request', upload.single('attachment'), async (req, res) => {
-  const { user_id, leave_type_id, start_date, end_date, days_requested, reason } = req.body;
+    const { user_id, leave_type_id, start_date, end_date, days_requested, reason } = req.body;
 
-  const days = days_requested;
+    // Convert days to number to be safe
+    const days = parseFloat(days_requested);
 
-  console.log("Parsed Body:", req.body);
-  console.log("Parsed File:", req.file);
+    console.log("🔍 New Leave Request:", { user_id, start_date, end_date, days });
 
-  // Validation
-  if (!user_id || !leave_type_id || !start_date || !end_date || !days || !reason) {
-    return res.status(400).send({ 
-      success: false,
-      message: 'Missing required fields (user_id, leave_type_id, start_date, end_date, days, reason).' 
-    });
-  }
-
-  // 👇 1. EXTRACT FILE PATH (Handle case where no file is uploaded)
-  // We use .path to get the location, and replace backslashes with forward slashes for Windows compatibility
-  const attachmentUrl = (req.file && req.file.path) 
-      ? req.file.path.replace(/\\/g, "/") 
-      : null;
-
-  let connection;
-
-  try {
-    connection = await db.pool.getConnection();
-    await connection.beginTransaction();
-
-    // 1. Check if user has enough leave balance
-    const [balanceCheck] = await connection.query(
-      'SELECT remaining_days FROM leave_balances WHERE user_id = ? AND leave_type_id = ?',
-      [user_id, leave_type_id]
-    );
-
-    // ... (Balance Check Logic stays the same) ...
-    if (balanceCheck.length === 0) {
-      await connection.rollback();
-      return res.status(404).send({ success: false, message: 'Leave balance not found.' });
+    // 1. Validation
+    if (!user_id || !leave_type_id || !start_date || !end_date || !days || !reason) {
+        return res.status(400).send({ 
+            success: false,
+            message: 'Missing required fields.' 
+        });
     }
 
-    const remainingDays = parseFloat(balanceCheck[0].remaining_days);
-    const requestedDays = parseFloat(days);
+    // 2. Extract File Path (if any)
+    const attachmentUrl = (req.file && req.file.path) 
+        ? req.file.path.replace(/\\/g, "/") 
+        : null;
 
-    if (remainingDays < requestedDays) {
-      await connection.rollback();
-      return res.status(400).send({ 
-        success: false, 
-        message: `Insufficient leave balance. Available: ${remainingDays}, Requested: ${requestedDays}.` 
-      });
-    }
+    let connection;
 
-    // 👇 2. UPDATE SQL QUERY (Added attachment_url)
-    const insertRequestQuery = `
-      INSERT INTO leave_requests 
-      (user_id, leave_type_id, start_date, end_date, days_requested, reason, attachment_url, status, created_at) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', NOW())
-    `;
-
-    // 👇 3. UPDATE PARAMETERS (Added attachmentUrl)
-    const [result] = await connection.query(insertRequestQuery, [
-      user_id,
-      leave_type_id,
-      start_date,
-      end_date,
-      days,
-      reason,
-      attachmentUrl // <--- Pass the file path here
-    ]);
-
-    // 3. Commit transaction
-    await connection.commit();
-
-    console.log(`Leave request created. ID: ${result.insertId}`);
-
-    // 👇 NOTIFICATION LOGIC (Supports VARCHAR manager_id)
     try {
-        // Step A: Get Employee Name and their Manager ID
-        const [userRows] = await db.pool.query(
-            'SELECT manager_id, name FROM users WHERE id = ?', 
-            [user_id]
+        connection = await db.pool.getConnection();
+        await connection.beginTransaction();
+
+        // 🟢 STEP A: CHECK FOR OVERLAPPING DATES
+        const overlapSql = `
+            SELECT id FROM leave_requests 
+            WHERE user_id = ? 
+            AND status IN ('Pending', 'Approved') 
+            AND (DATE(start_date) <= DATE(?) AND DATE(end_date) >= DATE(?))
+        `;
+        const [existing] = await connection.query(overlapSql, [user_id, end_date, start_date]);
+
+        if (existing.length > 0) {
+            await connection.rollback();
+            return res.status(400).send({ 
+                success: false, 
+                message: 'You already have a leave request for these dates!' 
+            });
+        }
+
+        // 🟢 STEP B: CHECK BALANCE
+        const [balanceCheck] = await connection.query(
+            'SELECT remaining_days FROM leave_balances WHERE user_id = ? AND leave_type_id = ?',
+            [user_id, leave_type_id]
         );
 
-        if (userRows.length > 0) {
-            const employeeName = userRows[0].name;
-            
-            // 1. Get the raw ID (It will be a String, e.g., "MGR-001" or "105")
-            let targetManagerId = userRows[0].manager_id;
+        // If no balance record exists, we assume 0 (or you could check default_days)
+        const remainingDays = balanceCheck.length > 0 ? parseFloat(balanceCheck[0].remaining_days) : 0;
 
-            // 2. Safety Check: Convert "null" string or empty string to real null
-            // (Sometimes imported data in VARCHAR columns stores "null" as text)
-            if (targetManagerId === 'null' || targetManagerId === '') {
-                targetManagerId = null;
-            }
+        if (remainingDays < days) {
+            await connection.rollback();
+            return res.status(400).send({ 
+                success: false, 
+                message: `Insufficient leave balance. Available: ${remainingDays}, Requested: ${days}.` 
+            });
+        }
 
-            // Step B: Fallback - If no manager, find ANY Manager in the system
-            if (!targetManagerId) {
-                console.log("No manager_id assigned. Searching for a general Manager...");
-                const [managerRows] = await db.pool.query(
-                    'SELECT id FROM users WHERE role = ? LIMIT 1', 
-                    ['Manager']
-                );
-                if (managerRows.length > 0) {
-                    targetManagerId = managerRows[0].id;
+        // 🟢 STEP C: INSERT REQUEST
+        const insertSql = `
+            INSERT INTO leave_requests 
+            (user_id, leave_type_id, start_date, end_date, days_requested, reason, attachment_url, status, created_at) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', NOW())
+        `;
+        const [result] = await connection.query(insertSql, [
+            user_id, leave_type_id, start_date, end_date, days, reason, attachmentUrl
+        ]);
+
+        // 🟢 STEP D: COMMIT TRANSACTION
+        await connection.commit();
+        console.log(`✅ Request #${result.insertId} saved successfully.`);
+
+        // 🟢 STEP E: NOTIFICATION (Now Active!)
+        try {
+            // 1. Get Employee Name & Manager ID
+            const [userRows] = await db.pool.query(
+                'SELECT manager_id, name FROM users WHERE id = ?', [user_id]
+            );
+
+            if (userRows.length > 0) {
+                const employeeName = userRows[0].name;
+                let targetManagerId = userRows[0].manager_id;
+
+                // 2. Fallback: If no manager assigned, find ANY manager (Optional safety net)
+                if (!targetManagerId || targetManagerId === 'null') {
+                    console.log("⚠️ No specific manager assigned. Searching for a general manager...");
+                    const [managerRows] = await db.pool.query(
+                        'SELECT id FROM users WHERE role = ? LIMIT 1', ['Manager']
+                    );
+                    if (managerRows.length > 0) {
+                        targetManagerId = managerRows[0].id;
+                    }
+                }
+
+                // 3. Send the Push Notification
+                if (targetManagerId) {
+                    const [typeRows] = await db.pool.query('SELECT name FROM leave_types WHERE id = ?', [leave_type_id]);
+                    const leaveTypeName = typeRows.length > 0 ? typeRows[0].name : 'Leave';
+
+                    console.log(`📲 Sending push to Manager ID: ${targetManagerId}`);
+                    
+                    await notificationService.sendPushToManager(
+                        targetManagerId, 
+                        employeeName, 
+                        leaveTypeName,
+                        result.insertId
+                    );
+                } else {
+                    console.log("⚠️ Could not find any manager to notify.");
                 }
             }
-
-            // Step C: Send Notification
-            if (targetManagerId) {
-                // Optional: Get Leave Type Name
-                const [typeRows] = await db.pool.query('SELECT name FROM leave_types WHERE id = ?', [leave_type_id]);
-                const leaveTypeName = typeRows.length > 0 ? typeRows[0].name : 'Leave';
-
-                await notificationService.sendPushToManager(
-                    targetManagerId, // Passing String ID works fine here
-                    employeeName, 
-                    leaveTypeName, 
-                    result.insertId
-                );
-            } else {
-                console.log("⚠️ No Manager found to notify.");
-            }
+        } catch (notifError) {
+            // Don't crash the request if notification fails, just log it
+            console.error("❌ Notification failed:", notifError);
         }
-    } catch (notifError) {
-        console.error("Failed to send notification:", notifError);
+
+        // Final Response
+        res.status(201).send({ 
+            success: true,
+            message: 'Leave request submitted successfully.', 
+            request_id: result.insertId 
+        });
+
+    } catch (error) {
+        if (connection) await connection.rollback();
+        console.error('❌ Error creating leave request:', error);
+        res.status(500).send({ success: false, message: 'Database error', error: error.message });
+    } finally {
+        if (connection) connection.release();
     }
-    // 👆 END NOTIFICATION LOGIC
-
-    res.status(201).send({ 
-      success: true,
-      message: 'Leave request submitted successfully.', 
-      request_id: result.insertId 
-    });
-
-  } catch (error) {
-    if (connection) await connection.rollback();
-    console.error('Error creating leave request:', error);
-    
-    res.status(500).send({ 
-      success: false,
-      message: 'Internal server error.', 
-      error: error.message 
-    });
-  } finally {
-    if (connection) connection.release();
-  }
 });
+
+module.exports = router;
+
 
 // GET /api/users/leave-requests
 router.get('/leave-requests', async (req, res) => {
@@ -604,5 +751,6 @@ router.get('/leave-request/:id', async (req, res) => {
 // Admin route to trigger New Year processing
 router.post('/admin/rollover-year', userController.rolloverLeaveYear);
 
+router.get('/:userId/balance', leaveController.getLeaveBalance);
 
 module.exports = router;
